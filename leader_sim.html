@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>引出線配置シミュレータ</title>
+<style>
+  :root{--bg:#f4f5f7;--panel:#fff;--ink:#1d2330;--muted:#6b7385;--line:#d9dde5;--accent:#3b5bdb;--pt:#5c6bd6;--lead:#222;--bad:#e03131;--l:#1971c2;--r:#2f9e44}
+  *{box-sizing:border-box}
+  body{margin:0;font:13px/1.5 system-ui,"Yu Gothic UI","Meiryo",sans-serif;background:var(--bg);color:var(--ink);display:flex;height:100vh;overflow:hidden}
+  #side{width:300px;flex:none;background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:14px}
+  #main{flex:1;position:relative;min-width:0}
+  canvas{display:block;width:100%;height:100%;cursor:grab}
+  canvas:active{cursor:grabbing}
+  h1{font-size:15px;margin:0 0 10px}
+  h2{font-size:12px;color:var(--muted);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.04em}
+  label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:5px 0}
+  label.chk{justify-content:flex-start}
+  select,input[type=number]{width:130px;padding:3px 5px;border:1px solid var(--line);border-radius:4px;font:inherit}
+  input[type=range]{width:130px}
+  button{font:inherit;padding:5px 10px;border:1px solid var(--line);background:#f8f9fb;border-radius:4px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+  textarea{width:100%;height:80px;font:11px monospace;border:1px solid var(--line);border-radius:4px}
+  #stats{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  #stats b{font-size:15px}
+  .bad{color:var(--bad)} .ok{color:var(--r)}
+  label.off{color:#adb5bd}
+  label.off select,label.off input{background:#f1f3f5;color:#adb5bd;cursor:not-allowed}
+  #tp{position:absolute;inset:12px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.12);padding:12px 16px;overflow:auto;z-index:5}
+  #tp .tp-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  #tp .tp-ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  #tp .tp-ctl label{margin:0;gap:4px}
+  #tp .tp-ctl input[type=number]{width:64px}
+  #tpChart{position:relative;margin-top:8px}
+  #tpTip{position:absolute;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #tpTip .sw{display:inline-block;width:10px;height:2px;vertical-align:middle;margin-right:6px}
+  .note{color:var(--muted);font-size:11.5px}
+  .res{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;margin:4px 0 8px}
+  .res td,.res th{border-bottom:1px solid var(--line);padding:3px 2px;text-align:right}
+  .res td:first-child,.res th:first-child{text-align:left}
+  #cmp{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+  #cmp td,#cmp th{border-bottom:1px solid var(--line);padding:3px 2px;text-align:right}
+  #cmp td:first-child,#cmp th:first-child{text-align:left}
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>引出線配置シミュレータ</h1>
+  <div class="note">3D点＝引出線の引出位置。ドラッグで回転、ホイールで拡大縮小。</div>
+
+  <h2>点群</h2>
+  <label>点の数 <span><input type="range" id="n" min="4" max="300" value="40"> <span id="nv">40</span></span></label>
+  <label>分布
+    <select id="dist">
+      <option value="box">直方体の表面</option>
+      <option value="vblock">Vブロック風</option>
+      <option value="sphere">球面</option>
+      <option value="volume">直方体内部</option>
+      <option value="cluster">クラスタ（密集）</option>
+    </select></label>
+  <label>乱数シード <input type="number" id="seed" value="1"></label>
+  <div class="row"><button id="regen">再生成</button><button id="nextseed">シード+1</button></div>
+
+  <h2>配置アルゴリズム</h2>
+  <label>配置方法
+    <select id="algo">
+      <option value="match">最小交差（最小総長マッチング）</option>
+      <option value="group">最小交差（組合せグループ化）</option>
+      <option value="ysort">終点等間隔（Y軸座標順）</option>
+      <option value="horiz">水平な引出線</option>
+    </select></label>
+  <label>グループの最大点数 <input type="number" id="gsize" value="8" min="2" max="9"></label>
+  <label>繰り返し回数の上限 <input type="number" id="iters" value="10" min="1" max="50"></label>
+  <label>中心の基準
+    <select id="center">
+      <option value="bbox">バウンディングボックス中心</option>
+      <option value="centroid">点群の重心</option>
+    </select></label>
+  <label class="chk"><input type="checkbox" id="balance"> 左右の本数を均等化</label>
+  <label>スロット範囲
+    <select id="range">
+      <option value="full">画面の上下いっぱい</option>
+      <option value="model">点群の上下範囲＋余白</option>
+    </select></label>
+  <label>引出線水平部分
+    <select id="hmode">
+      <option value="screen">X方向を画面に固定</option>
+      <option value="edge">外側の点に合わせて伸縮</option>
+    </select></label>
+  <label>水平部分の長さ(px) <input type="number" id="hlen" value="20" min="0" max="600"></label>
+  <label>引出し線の余白(px) <input type="number" id="gap" value="40" min="0" max="300"></label>
+  <div class="note">「X方向を画面に固定」：枠と水平線の左右位置は画面上で動かない。上下位置はその側の本数に応じて等間隔に並び直す（発表資料13ページ）。</div>
+
+  <h2>表示</h2>
+  <label class="chk"><input type="checkbox" id="showX" checked> 交差点を赤で表示</label>
+  <label class="chk"><input type="checkbox" id="showAxes" checked> 座標軸・中心線</label>
+  <label class="chk"><input type="checkbox" id="showBox" checked> バウンディングボックス</label>
+  <label class="chk"><input type="checkbox" id="showIds"> 点番号</label>
+  <label class="chk"><input type="checkbox" id="showGroups" checked> 交差グループを色分け（組合せグループ化）</label>
+  <div class="row"><button id="resetView">視点リセット</button><button id="spin">自動回転</button></div>
+
+  <h2>3手法の比較（現在の視点）</h2>
+  <table id="cmp"></table>
+  <div class="note">ms＝この視点で1回計算した時間（目安）</div>
+  <div class="row"><button id="bench">計算時間を計測</button><button id="sweep">回転スイープ（36視点平均）</button></div>
+  <div class="row"><button id="openChart">計算時間グラフ（点数 n と計算時間）</button></div>
+  <div id="benchOut"></div>
+  <div id="sweepOut"></div>
+
+  <h2>座標の読込（x,y,z / 行）</h2>
+  <textarea id="csv" placeholder="10,0,5&#10;12.5,3,0&#10;..."></textarea>
+  <div class="row"><button id="load">読込</button><button id="dump">現在の点を出力</button></div>
+</div>
+<div id="main"><canvas id="cv"></canvas><div id="stats"></div>
+<div id="tp" hidden>
+  <div class="tp-head">
+    <b>点数 n と計算時間</b>
+    <span class="tp-ctl">
+      <label>n の最大 <input type="number" id="tpMax" value="200" min="10" max="400" step="10"></label>
+      <label>刻み <input type="number" id="tpStep" value="10" min="2" max="100"></label>
+      <label>視点数 <input type="number" id="tpViews" value="4" min="1" max="36"></label>
+      <label class="chk"><input type="checkbox" id="tpLog" checked> 縦軸を対数</label>
+      <button id="tpRun">計測開始</button><button id="tpCsv">CSV保存</button><button id="tpPng">PNG保存</button><button id="tpClose">閉じる</button>
+    </span>
+  </div>
+  <div id="tpNote" class="note"></div>
+  <div id="tpChart"></div>
+  <div id="tpTip" hidden></div>
+</div>
+</div>
+
+<script>
+// ---------- 乱数 ----------
+function rng(seed){let s=seed>>>0||1;return()=>{s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/4294967296}}
+
+// ---------- 点群生成 ----------
+function genPoints(n,dist,seed){
+  const r=rng(seed*2654435761), P=[];
+  const W=100,D=60,H=70;
+  const onBox=()=>{ // 面積比で面を選ぶ
+    const a=[D*H,D*H,W*H,W*H,W*D,W*D], t=a.reduce((x,y)=>x+y);
+    let u=r()*t,f=0; while(u>a[f]){u-=a[f];f++}
+    let x=(r()-.5)*W,y=(r()-.5)*H,z=(r()-.5)*D;
+    if(f<2)x=(f?1:-1)*W/2; else if(f<4)z=(f%2?1:-1)*D/2; else y=(f%2?1:-1)*H/2;
+    return [x,y,z];
+  };
+  for(let i=0;i<n;i++){
+    if(dist==='box')P.push(onBox());
+    else if(dist==='volume')P.push([(r()-.5)*W,(r()-.5)*H,(r()-.5)*D]);
+    else if(dist==='sphere'){const u=r()*2-1,th=r()*Math.PI*2,s=Math.sqrt(1-u*u);P.push([50*s*Math.cos(th),50*u,50*s*Math.sin(th)])}
+    else if(dist==='vblock'){ // V溝付きブロック断面を押し出し
+      const prof=[[-50,-35],[50,-35],[50,35],[35,35],[0,0],[-35,35],[-50,35]];
+      const segs=[];let L=0;for(let k=0;k<prof.length;k++){const a=prof[k],b=prof[(k+1)%prof.length],l=Math.hypot(b[0]-a[0],b[1]-a[1]);segs.push([a,b,l]);L+=l}
+      if(r()<.75){let u=r()*L,k=0;while(u>segs[k][2]){u-=segs[k][2];k++}const[a,b,l]=segs[k],t=u/l;P.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,(r()-.5)*D])}
+      else{let x,y;do{x=(r()-.5)*100;y=(r()-.5)*70}while(y>-0.0&&Math.abs(x)<y);P.push([x,y,(r()<.5?-1:1)*D/2])}
+    }
+    else if(dist==='cluster'){
+      if(i%Math.max(1,Math.ceil(n/5))===0||!genPoints._c){genPoints._c=onBox()}
+      const c=genPoints._c;P.push([c[0]+(r()-.5)*14,c[1]+(r()-.5)*14,c[2]+(r()-.5)*14]);
+    }
+  }
+  genPoints._c=null;
+  return P;
+}
+
+// ---------- 投影 ----------
+let yaw=-0.6,pitch=0.45,zoom=1;
+function project(P,w,h){
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const s=Math.min(w,h)/260*zoom;
+  return P.map(([x,y,z])=>{
+    const x1=cy*x+sy*z, z1=-sy*x+cy*z;
+    const y2=cp*y-sp*z1, z2=sp*y+cp*z1;
+    return {x:w/2+x1*s,y:h/2-y2*s,d:z2};
+  });
+}
+
+// ---------- ハンガリアン法（最小コスト割当） ----------
+function hungarian(C){ // C: n×n, returns assign[row]=col
+  const n=C.length,INF=1e18,u=new Float64Array(n+1),v=new Float64Array(n+1),p=new Int32Array(n+1),way=new Int32Array(n+1);
+  for(let i=1;i<=n;i++){
+    p[0]=i;let j0=0;const minv=new Float64Array(n+1).fill(INF),used=new Uint8Array(n+1);
+    do{used[j0]=1;const i0=p[j0];let d=INF,j1=0;
+      for(let j=1;j<=n;j++)if(!used[j]){const c=C[i0-1][j-1]-u[i0]-v[j];if(c<minv[j]){minv[j]=c;way[j]=j0}if(minv[j]<d){d=minv[j];j1=j}}
+      for(let j=0;j<=n;j++)if(used[j]){u[p[j]]+=d;v[j]-=d}else minv[j]-=d;
+      j0=j1}while(p[j0]!==0);
+    do{const j1=way[j0];p[j0]=p[j1];j0=j1}while(j0);
+  }
+  const a=new Int32Array(n);for(let j=1;j<=n;j++)a[p[j]-1]=j-1;return a;
+}
+
+// ---------- 組合せ探索（交差数が最小 → 同数なら総線長が最小） ----------
+function polyCross(a,b){let c=0;for(let i=0;i+1<a.length;i++)for(let j=0;j+1<b.length;j++)if(segX(a[i],a[i+1],b[j],b[j+1]))c++;return c}
+// Q: 点の番号, Y: 枠の高さ（Qと同数）, fixed: 確定済みの引出線, mk(i,y): 引出線の折れ線
+// 戻り値: perm[q] = Yの何番目を使うか
+function bestPerm(Q,Y,fixed,mk,stat){
+  const g=Q.length,cand=[],fx=[],len=[];
+  for(let q=0;q<g;q++)for(let s=0;s<g;s++){const pl=mk(Q[q],Y[s]);cand.push(pl);
+    fx.push(fixed.reduce((c,f)=>c+polyCross(pl,f),0));
+    len.push(Math.hypot(pl[1][0]-pl[0][0],pl[1][1]-pl[0][1]))}
+  const X=new Int32Array(g*g*g*g);
+  for(let a=0;a<g*g;a++)for(let b=a+1;b<g*g;b++){const v=polyCross(cand[a],cand[b]);X[a*g*g+b]=X[b*g*g+a]=v}
+  const used=new Uint8Array(g),cur=new Int32Array(g),best=new Int32Array(g);let bc=1e9,bl=1e18;
+  const dfs=(q,c,l)=>{
+    if(q===g){stat.combos++;if(c<bc||(c===bc&&l<bl)){bc=c;bl=l;best.set(cur)}return}
+    for(let s=0;s<g;s++)if(!used[s]){
+      const k=q*g+s;let add=fx[k];for(let p=0;p<q;p++)add+=X[k*g*g+p*g+cur[p]];
+      used[s]=1;cur[q]=s;dfs(q+1,c+add,l+len[k]);used[s]=0;
+    }
+  };
+  dfs(0,0,0);return best;
+}
+// ---------- レイアウト ----------
+const LABEL_W=70;
+function layout(S,P3,opt,w,h){
+  const n=S.length; if(!n)return {leaders:[],left:0,right:0,elbowCols:[],groupOf:{},combos:0};
+  // 中心
+  let cx;
+  if(opt.center==='centroid'){
+    const c=[0,0,0];P3.forEach(p=>{c[0]+=p[0];c[1]+=p[1];c[2]+=p[2]});c.forEach((v,i)=>c[i]=v/n);cx=project([c],w,h)[0].x;
+  }else{
+    const mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];P3.forEach(p=>p.forEach((v,i)=>{mn[i]=Math.min(mn[i],v);mx[i]=Math.max(mx[i],v)}));
+    cx=project([[(mn[0]+mx[0])/2,(mn[1]+mx[1])/2,(mn[2]+mx[2])/2]],w,h)[0].x;
+  }
+  // 左右分割
+  let L=[],R=[];
+  S.forEach((p,i)=>(p.x<cx?L:R).push(i));
+  if(opt.balance){ // 中心線に近い点から反対側へ移す
+    while(Math.abs(L.length-R.length)>1){
+      const big=L.length>R.length?L:R,small=big===L?R:L;
+      big.sort((a,b)=>Math.abs(S[b].x-cx)-Math.abs(S[a].x-cx));
+      small.push(big.pop());
+    }
+  }
+  // スロット範囲
+  let top=24,bot=h-24;
+  if(opt.range==='model'){let a=1e9,b=-1e9;S.forEach(p=>{a=Math.min(a,p.y);b=Math.max(b,p.y)});top=Math.max(24,a-60);bot=Math.min(h-24,b+60)}
+  const minX=Math.min(...S.map(p=>p.x)),maxX=Math.max(...S.map(p=>p.x));
+  const leaders=[];
+  const screen=opt.hmode==='screen';
+  let outside=0,groupCount=0,split=0,maxComp=0,iterUsed=0;const groupOf={},stat={combos:0};
+  const side=(ids,dir)=>{
+    const m=ids.length;if(!m)return;
+    let elbowX,labelX;
+    if(screen){ // 枠と水平線を画面に固定
+      labelX=dir<0?LABEL_W+12:w-LABEL_W-12;
+      elbowX=labelX-dir*opt.hlen;
+      ids.forEach(i=>{if(dir<0?S[i].x<elbowX:S[i].x>elbowX)outside++});
+    }else{ // 曲がり点＝その側の最外点のさらに外側
+      const ext=dir<0?Math.min(...ids.map(i=>S[i].x)):Math.max(...ids.map(i=>S[i].x));
+      elbowX=ext+dir*opt.gap;
+      labelX=dir<0?Math.min(elbowX-30,LABEL_W+12):Math.max(elbowX+30,w-LABEL_W-12);
+    }
+    const k=m;
+    const slots=[];
+    for(let j=0;j<k;j++)slots.push(k===1?(top+bot)/2:top+(bot-top)*j/(k-1));
+    let assign;
+    if(opt.algo==='horiz'){
+      ids.forEach(i=>leaders.push({i,dir,pts:[[S[i].x,S[i].y],[labelX,S[i].y]],ly:S[i].y,lx:labelX}));return;
+    }else if(opt.algo==='ysort'){
+      const ord=ids.map((i,q)=>q).sort((p,q)=>S[ids[p]].y-S[ids[q]].y);
+      assign=new Int32Array(m);ord.forEach((q,r)=>assign[q]=r);
+    }else if(opt.algo==='group'){
+      const mk=(i,y)=>[[S[i].x,S[i].y],[elbowX,y],[labelX,y]];
+      // 1) 終点等間隔（Y軸座標順）で並べる
+      const ord=ids.map((i,q)=>q).sort((p,q)=>S[ids[p]].y-S[ids[q]].y);
+      assign=new Int32Array(m);ord.forEach((q,r)=>assign[q]=r);
+      const total=()=>{const pl=ids.map((i,q)=>mk(i,slots[assign[q]]));let c=0;for(let p=0;p<m;p++)for(let q=p+1;q<m;q++)c+=polyCross(pl[p],pl[q]);return c};
+      let cur=total(),noImp=0;
+      for(let t=0;t<opt.iters&&cur>0;t++){
+        // 2) 今の表示で交差している引出線同士をつなぎ、つながった塊を1グループにする
+        const pl=ids.map((i,q)=>mk(i,slots[assign[q]]));
+        const par=ids.map((i,q)=>q),root=q=>par[q]===q?q:(par[q]=root(par[q]));
+        for(let p=0;p<m;p++)for(let q=p+1;q<m;q++)if(polyCross(pl[p],pl[q]))par[root(p)]=root(q);
+        const comp=new Map();for(let q=0;q<m;q++){const r=root(q);if(!comp.has(r))comp.set(r,[]);comp.get(r).push(q)}
+        // 最大点数を超える塊は枠の上から順に区切る。奇数回目は区切り位置を半分ずらし、前回の境目をまたいで組み替える
+        const shift=t%2?Math.floor(opt.gsize/2):0,groups=[];
+        [...comp.values()].filter(c=>c.length>1).forEach(c=>{
+          c.sort((p,q)=>assign[p]-assign[q]);
+          if(t===0&&c.length>opt.gsize){split++;maxComp=Math.max(maxComp,c.length)}
+          const cuts=[0];if(c.length>opt.gsize)for(let k=shift||opt.gsize;k<c.length;k+=opt.gsize)cuts.push(k);
+          cuts.forEach((k,j)=>{const g=c.slice(k,cuts[j+1]??c.length);if(g.length>1)groups.push(g)});
+        });
+        groups.sort((g,h)=>assign[g[0]]-assign[h[0]]);
+        // 3) グループごとに、そのグループが使っている枠の中で全組合せを試す
+        groups.forEach(g=>{
+          const own=g.map(q=>assign[q]).sort((x,y)=>x-y),Y=own.map(k=>slots[k]);
+          const inG=new Set(g),fixed=[];for(let q=0;q<m;q++)if(!inG.has(q))fixed.push(mk(ids[q],slots[assign[q]]));
+          const perm=bestPerm(g.map(q=>ids[q]),Y,fixed,mk,stat);
+          g.forEach((q,u)=>{assign[q]=own[perm[u]];if(t===0)groupOf[ids[q]]=groupCount});
+          if(t===0)groupCount++;
+        });
+        iterUsed=Math.max(iterUsed,t+1);
+        // 4) 交差が減らない回が2回続いたら終了（区切り位置を変えても改善しない）
+        const nxt=total();if(nxt<cur){cur=nxt;noImp=0}else if(++noImp>=2)break;
+      }
+    }else{
+      const C=ids.map(i=>slots.map(y=>Math.hypot(S[i].x-elbowX,S[i].y-y)));
+      assign=hungarian(C);
+    }
+    ids.forEach((i,q)=>{const y=slots[assign[q]];leaders.push({i,dir,pts:[[S[i].x,S[i].y],[elbowX,y],[labelX,y]],ly:y,lx:labelX})});
+    if(screen)elbowCols.push(elbowX);
+  };
+  const elbowCols=[];
+  side(L,-1);side(R,1);
+  return {leaders,left:L.length,right:R.length,cx,top,bot,outside,elbowCols,groupOf,groupCount,split,maxComp,iterUsed,combos:stat.combos};
+}
+
+// ---------- 交差判定 ----------
+function segX(a,b,c,d){
+  const o=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]);
+  const d1=o(c,d,a),d2=o(c,d,b),d3=o(a,b,c),d4=o(a,b,d);
+  if(((d1>0&&d2<0)||(d1<0&&d2>0))&&((d3>0&&d4<0)||(d3<0&&d4>0))){
+    const t=d1/(d1-d2);return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+  }return null;
+}
+function crossings(leaders){
+  const segs=[];leaders.forEach((l,li)=>{for(let k=0;k+1<l.pts.length;k++)segs.push([l.pts[k],l.pts[k+1],li])});
+  const X=[];
+  for(let a=0;a<segs.length;a++)for(let b=a+1;b<segs.length;b++){
+    if(segs[a][2]===segs[b][2])continue;const p=segX(segs[a][0],segs[a][1],segs[b][0],segs[b][1]);if(p)X.push(p);
+  }
+  return X;
+}
+function overlaps(leaders,lh){ // ラベル同士の重なり（縦間隔 < ラベル高さ）
+  let c=0;[-1,1].forEach(d=>{const ys=leaders.filter(l=>l.dir===d).map(l=>l.ly).sort((a,b)=>a-b);for(let k=1;k<ys.length;k++)if(ys[k]-ys[k-1]<lh)c++});return c;
+}
+const totLen=ls=>ls.reduce((s,l)=>{let t=0;for(let k=0;k+1<l.pts.length;k++)t+=Math.hypot(l.pts[k+1][0]-l.pts[k][0],l.pts[k+1][1]-l.pts[k][1]);return s+t},0);
+
+// ---------- 描画 ----------
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),$=id=>document.getElementById(id);
+let P3=[];
+function opts(){return{algo:$('algo').value,center:$('center').value,balance:$('balance').checked,range:$('range').value,gap:+$('gap').value,hmode:$('hmode').value,hlen:+$('hlen').value,iters:Math.max(1,Math.min(50,+$('iters').value||1)),gsize:Math.max(2,Math.min(9,+$('gsize').value||8))}}
+function size(){const r=cv.getBoundingClientRect(),dpr=devicePixelRatio||1;cv.width=r.width*dpr;cv.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);return[r.width,r.height]}
+// 使われない設定をグレー表示
+function updateEnabled(){
+  const horiz=$('algo').value==='horiz',screen=$('hmode').value==='screen';
+  const set=(id,on)=>{$(id).disabled=!on;$(id).closest('label').classList.toggle('off',!on)};
+  set('hmode',!horiz);
+  set('hlen',!horiz&&screen);
+  set('gap',!horiz&&!screen);
+  set('gsize',$('algo').value==='group');
+  set('iters',$('algo').value==='group');
+}
+const ALGOS=[['match','最小総長マッチング'],['group','組合せグループ化'],['ysort','終点等間隔(Y軸座標順)'],['horiz','水平な引出線']];
+function draw(){updateEnabled();
+  const[w,h]=size();ctx.clearRect(0,0,w,h);ctx.fillStyle='#f4f5f7';ctx.fillRect(0,0,w,h);
+  const S=project(P3,w,h),o=opts();
+  const t0=performance.now();const Lr=layout(S,P3,o,w,h);const dt=performance.now()-t0;
+  const X=crossings(Lr.leaders);
+  const lh=Math.max(6,Math.min(18,(Lr.bot-Lr.top)/Math.max(1,Lr.left,Lr.right)-2));
+  // bbox
+  if($('showBox').checked&&P3.length){
+    const mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];P3.forEach(p=>p.forEach((v,i)=>{mn[i]=Math.min(mn[i],v);mx[i]=Math.max(mx[i],v)}));
+    const V=[];for(let k=0;k<8;k++)V.push([k&1?mx[0]:mn[0],k&2?mx[1]:mn[1],k&4?mx[2]:mn[2]]);
+    const Q=project(V,w,h);ctx.strokeStyle='#b8bfd6';ctx.lineWidth=1;ctx.beginPath();
+    [[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]].forEach(([a,b])=>{ctx.moveTo(Q[a].x,Q[a].y);ctx.lineTo(Q[b].x,Q[b].y)});ctx.stroke();
+  }
+  if($('showAxes').checked){
+    ctx.setLineDash([5,5]);ctx.strokeStyle='#adb5bd';ctx.beginPath();ctx.moveTo(Lr.cx,0);ctx.lineTo(Lr.cx,h);ctx.stroke();ctx.setLineDash([]);
+    const A=project([[0,0,0],[30,0,0],[0,30,0],[0,0,30]],w,h);
+    [['X','#e03131'],['Y','#2f9e44'],['Z','#1971c2']].forEach(([n,c],k)=>{ctx.strokeStyle=c;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(A[0].x,A[0].y);ctx.lineTo(A[k+1].x,A[k+1].y);ctx.stroke();ctx.fillStyle=c;ctx.fillText(n,A[k+1].x+3,A[k+1].y-3)});
+    ctx.lineWidth=1;
+  }
+  // 曲がり点の列（X固定モード）
+  if(o.hmode==='screen'){ctx.setLineDash([2,4]);ctx.strokeStyle='#ced4da';Lr.elbowCols.forEach(x=>{ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()});ctx.setLineDash([])}
+  // 引出線
+  ctx.lineWidth=1;
+  Lr.leaders.forEach(l=>{
+    ctx.strokeStyle=l.dir<0?'rgba(25,113,194,.85)':'rgba(47,158,68,.85)';
+    ctx.beginPath();ctx.moveTo(l.pts[0][0],l.pts[0][1]);for(let k=1;k<l.pts.length;k++)ctx.lineTo(l.pts[k][0],l.pts[k][1]);ctx.stroke();
+    // ラベル枠
+    const x=l.dir<0?l.lx-LABEL_W:l.lx;ctx.fillStyle='#fff';ctx.strokeStyle='#495057';
+    ctx.fillRect(x,l.ly-lh/2,LABEL_W,lh);ctx.strokeRect(x,l.ly-lh/2,LABEL_W,lh);
+    if(lh>=9){ctx.fillStyle='#212529';ctx.font=`${Math.min(12,lh-2)}px system-ui`;ctx.fillText('#'+l.i,x+4,l.ly+Math.min(12,lh-2)/2-1)}
+  });
+  // 点（奥→手前）
+  S.map((p,i)=>[p,i]).sort((a,b)=>a[0].d-b[0].d).forEach(([p,i])=>{
+    if(o.algo==='group'&&$('showGroups').checked&&Lr.groupOf[i]!==undefined){ctx.fillStyle=`hsla(${(Lr.groupOf[i]*137.5)%360},80%,50%,.35)`;ctx.beginPath();ctx.arc(p.x,p.y,8,0,7);ctx.fill()}
+    ctx.fillStyle='#3b4bc8';ctx.beginPath();ctx.arc(p.x,p.y,3,0,7);ctx.fill();
+    if($('showIds').checked){ctx.fillStyle='#343a40';ctx.font='10px system-ui';ctx.fillText(i,p.x+4,p.y-4)}
+  });
+  if($('showX').checked){ctx.strokeStyle='#e03131';ctx.lineWidth=1.5;X.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.stroke()})}
+  const ov=overlaps(Lr.leaders,lh);
+  $('stats').innerHTML=`点 <b>${P3.length}</b>　左 ${Lr.left} / 右 ${Lr.right}　交差 <b class="${X.length?'bad':'ok'}">${X.length}</b>　ラベル重なり <b class="${ov?'bad':'ok'}">${ov}</b>　総線長 ${totLen(Lr.leaders).toFixed(0)}px　計算 ${dt.toFixed(1)}ms${o.algo==='group'?`（交差グループ ${Lr.groupCount}・繰り返し ${Lr.iterUsed}回・${Lr.combos.toLocaleString()}通り評価${Lr.split?`・<b class="bad">${o.gsize}本超の塊を分割 ${Lr.split}（最大${Lr.maxComp}本）</b>`:''}）`:''}${o.hmode==='screen'?`　曲がり点より外の点 <b class="${Lr.outside?'bad':'ok'}">${Lr.outside}</b>`:''}`;
+  // 比較表
+  let rows='<tr><th>手法</th><th>交差</th><th>重なり</th><th>総線長</th><th>ms</th></tr>';
+  ALGOS.forEach(([a,n])=>{
+    const t=performance.now(),r=layout(S,P3,{...o,algo:a},w,h),ms=performance.now()-t,b=a===o.algo?' style="font-weight:600"':'';
+    rows+=`<tr${b}><td>${n}</td><td>${crossings(r.leaders).length}</td><td>${overlaps(r.leaders,lh)}</td><td>${totLen(r.leaders).toFixed(0)}</td><td>${fmt(ms)}</td></tr>`;
+  });
+  $('cmp').innerHTML=rows;
+}
+
+// ---------- 操作 ----------
+function regen(){P3=genPoints(+$('n').value,$('dist').value,+$('seed').value);$('sweepOut').textContent='';$('benchOut').textContent='';draw()}
+$('n').oninput=()=>{$('nv').textContent=$('n').value;regen()};
+['dist','seed'].forEach(id=>$(id).onchange=regen);
+$('regen').onclick=regen;
+$('nextseed').onclick=()=>{$('seed').value=+$('seed').value+1;regen()};
+['algo','center','balance','range','gap','hmode','hlen','gsize','iters','showGroups','showX','showAxes','showBox','showIds'].forEach(id=>$(id).oninput=draw);
+$('resetView').onclick=()=>{yaw=-0.6;pitch=0.45;zoom=1;draw()};
+let spinning=null;$('spin').onclick=()=>{if(spinning){cancelAnimationFrame(spinning);spinning=null;return}const f=()=>{yaw+=0.01;draw();spinning=requestAnimationFrame(f)};f()};
+let drag=null;
+cv.onpointerdown=e=>{drag=[e.clientX,e.clientY];cv.setPointerCapture(e.pointerId)};
+cv.onpointermove=e=>{if(!drag)return;yaw+=(e.clientX-drag[0])*0.008;pitch=Math.max(-1.55,Math.min(1.55,pitch+(e.clientY-drag[1])*0.008));drag=[e.clientX,e.clientY];draw()};
+cv.onpointerup=()=>drag=null;
+cv.onwheel=e=>{e.preventDefault();zoom*=Math.exp(-e.deltaY*0.001);zoom=Math.max(.2,Math.min(5,zoom));draw()};
+addEventListener('resize',draw);
+const fmt=ms=>ms<1?ms.toFixed(3):ms<100?ms.toFixed(1):ms.toFixed(0);
+const tbl=(head,rows)=>`<table class="res"><tr>${head.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.map(r=>`<tr>${r.map(x=>`<td>${x}</td>`).join('')}</tr>`).join('')}</table>`;
+// 現在の視点で各配置方法を繰り返し計算し、1回あたりの時間を求める
+$('bench').onclick=()=>{
+  $('benchOut').innerHTML='<div class="note">計測中…</div>';
+  setTimeout(()=>{
+    const r=cv.getBoundingClientRect(),w=r.width,h=r.height,o=opts(),S=project(P3,w,h);
+    const rows=ALGOS.map(([a,n])=>{
+      layout(S,P3,{...o,algo:a},w,h); // 試し実行（JITの準備）
+      const ts=[];const t0=performance.now();
+      while(ts.length<200&&(ts.length<5||performance.now()-t0<500)){const t=performance.now();layout(S,P3,{...o,algo:a},w,h);ts.push(performance.now()-t)}
+      const total=performance.now()-t0;ts.sort((x,y)=>x-y);
+      return [n,fmt(total/ts.length),fmt(ts[ts.length>>1]),fmt(ts[ts.length-1]),ts.length];
+    });
+    $('benchOut').innerHTML=`<div class="note">計算時間（現在の視点・${P3.length}点、単位ms）</div>`+tbl(['手法','平均','中央値','最大','回数'],rows);
+  },20);
+};
+$('sweep').onclick=()=>{
+  $('sweepOut').innerHTML='<div class="note">計算中…</div>';
+  setTimeout(()=>{
+    const r=cv.getBoundingClientRect(),w=r.width,h=r.height,o=opts(),sy=yaw,res={};ALGOS.forEach(([a])=>res[a]={x:0,ov:0,ms:0,max:0});
+    for(let k=0;k<36;k++){yaw=sy+k*Math.PI*2/36;const S=project(P3,w,h);
+      for(const a in res){const t=performance.now(),L=layout(S,P3,{...o,algo:a},w,h),ms=performance.now()-t;const lh=Math.max(6,Math.min(18,(L.bot-L.top)/Math.max(1,L.left,L.right)-2));
+        res[a].x+=crossings(L.leaders).length;res[a].ov+=overlaps(L.leaders,lh);res[a].ms+=ms;res[a].max=Math.max(res[a].max,ms)}}
+    yaw=sy;draw();
+    $('sweepOut').innerHTML=`<div class="note">Y軸周り36視点の平均（${P3.length}点、時間はms）</div>`+tbl(['手法','交差','重なり','平均ms','最大ms'],ALGOS.map(([a,n])=>[n,(res[a].x/36).toFixed(2),(res[a].ov/36).toFixed(1),fmt(res[a].ms/36),fmt(res[a].max)]));
+  },20);
+};
+$('load').onclick=()=>{
+  const pts=$('csv').value.split(/\r?\n/).map(s=>s.split(/[,\s\t]+/).filter(Boolean).map(Number)).filter(a=>a.length>=3&&a.slice(0,3).every(isFinite)).map(a=>a.slice(0,3));
+  if(!pts.length)return alert('有効な座標がありません');
+  const c=[0,1,2].map(i=>pts.reduce((s,p)=>s+p[i],0)/pts.length),ext=Math.max(...pts.flatMap(p=>p.map((v,i)=>Math.abs(v-c[i]))))||1;
+  P3=pts.map(p=>p.map((v,i)=>(v-c[i])*60/ext));$('n').value=P3.length;$('nv').textContent=P3.length+'(読込)';draw();
+};
+$('dump').onclick=()=>{$('csv').value=P3.map(p=>p.map(v=>v.toFixed(3)).join(',')).join('\n')};
+// ---------- 計算時間グラフ ----------
+const TP_COLORS={match:'#2a78d6',group:'#eb6834',ysort:'#1baf7a',horiz:'#eda100'};
+let tpData=null,tpBusy=false;
+$('openChart').onclick=()=>{$('tp').hidden=false;if(!tpData)$('tpNote').textContent='「計測開始」を押すと、現在の分布・シード・配置アルゴリズムの設定で n を変えながら各配置方法の計算時間を測ります。';else drawTP()};
+$('tpClose').onclick=()=>{$('tp').hidden=true};
+$('tpLog').oninput=()=>tpData&&drawTP();
+$('tpRun').onclick=()=>{
+  if(tpBusy)return;tpBusy=true;
+  const max=Math.max(10,+$('tpMax').value||200),step=Math.max(2,+$('tpStep').value||10),views=Math.max(1,+$('tpViews').value||4);
+  const ns=[];for(let n=step;n<=max;n+=step)ns.push(n);
+  const r=cv.getBoundingClientRect(),w=r.width,h=r.height,o=opts(),dist=$('dist').value,seed=+$('seed').value,sy=yaw;
+  tpData={ns:[],ms:{},cond:`分布：${$('dist').selectedOptions[0].text}／シード ${seed}／各 n で ${views} 視点の平均／描画領域 ${Math.round(w)}×${Math.round(h)}px／グループ最大 ${o.gsize}点・繰り返し上限 ${o.iters}`};
+  ALGOS.forEach(([a])=>tpData.ms[a]=[]);
+  let idx=0;
+  const stepFn=()=>{
+    if(idx>=ns.length){tpBusy=false;yaw=sy;$('tpNote').textContent='計測完了　'+tpData.cond;drawTP();return}
+    const n=ns[idx++],P=genPoints(n,dist,seed);
+    ALGOS.forEach(([a])=>{
+      let sum=0;
+      for(let v=0;v<views;v++){
+        yaw=sy+v*Math.PI*2/views;const S=project(P,w,h),oa={...o,algo:a};
+        layout(S,P,oa,w,h); // 試し実行
+        let reps=0;const t0=performance.now();
+        do{layout(S,P,oa,w,h);reps++}while(performance.now()-t0<5&&reps<200);
+        sum+=(performance.now()-t0)/reps;
+      }
+      tpData.ms[a].push(sum/views);
+    });
+    tpData.ns.push(n);
+    $('tpNote').textContent=`計測中… n = ${n} / ${max}`;drawTP();
+    setTimeout(stepFn,0);
+  };
+  stepFn();
+};
+function drawTP(){
+  const d=tpData;if(!d||!d.ns.length)return;
+  const W=Math.max(520,Math.min(980,$('tp').clientWidth-40)),H=440,m={l:70,r:150,t:40,b:50},iw=W-m.l-m.r,ih=H-m.t-m.b,log=$('tpLog').checked;
+  const all=ALGOS.flatMap(([a])=>d.ms[a]).filter(v=>v>0);
+  const xmax=Math.max(...d.ns),xmin=0;
+  let ymin,ymax,ticks;
+  if(log){ymin=Math.pow(10,Math.floor(Math.log10(Math.min(...all))));ymax=Math.pow(10,Math.ceil(Math.log10(Math.max(...all))));if(ymax===ymin)ymax*=10;ticks=[];for(let t=ymin;t<=ymax*1.0001;t*=10)ticks.push(t)}
+  else{ymin=0;const mx=Math.max(...all),e=Math.pow(10,Math.floor(Math.log10(mx))),st=[1,2,5,10].map(k=>k*e).find(k=>mx/k<=6);ymax=Math.ceil(mx/st)*st;ticks=[];for(let t=0;t<=ymax+1e-9;t+=st)ticks.push(t)}
+  const X=n=>m.l+(n-xmin)/(xmax-xmin)*iw;
+  const Y=v=>log?m.t+ih-(Math.log10(Math.max(v,ymin))-Math.log10(ymin))/(Math.log10(ymax)-Math.log10(ymin))*ih:m.t+ih-(v-ymin)/(ymax-ymin)*ih;
+  const tf=v=>v>=1?(+v.toPrecision(3)).toLocaleString():+v.toPrecision(2)+'';
+  const xs=[];const xst=[10,20,25,50,100].find(k=>xmax/k<=10)||100;for(let t=0;t<=xmax;t+=xst)xs.push(t);
+  let g=`<svg id="tpSvg" xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="system-ui,'Yu Gothic UI',Meiryo,sans-serif" font-size="12">`;
+  g+=`<rect width="${W}" height="${H}" fill="#fcfcfb"/>`;
+  ticks.forEach(t=>{const y=Y(t);g+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${y}" y2="${y}" stroke="#e4e4e0"/><text x="${m.l-8}" y="${y+4}" text-anchor="end" fill="#52514e">${tf(t)}</text>`});
+  xs.forEach(t=>{const x=X(t);g+=`<text x="${x}" y="${m.t+ih+18}" text-anchor="middle" fill="#52514e">${t}</text>`});
+  g+=`<line x1="${m.l}" x2="${m.l+iw}" y1="${m.t+ih}" y2="${m.t+ih}" stroke="#a9a8a2"/>`;
+  g+=`<text x="${m.l+iw/2}" y="${H-10}" text-anchor="middle" fill="#0b0b0b">点数 n（引出線の本数）</text>`;
+  g+=`<text transform="translate(16,${m.t+ih/2}) rotate(-90)" text-anchor="middle" fill="#0b0b0b">計算時間（ms／1回）${log?'　対数目盛':''}</text>`;
+  // lines + end labels
+  const ends=[];
+  ALGOS.forEach(([a,name])=>{
+    const pts=d.ns.map((n,i)=>[X(n),Y(d.ms[a][i])]);
+    g+=`<polyline fill="none" stroke="${TP_COLORS[a]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(p=>p.join(',')).join(' ')}"/>`;
+    const p=pts[pts.length-1];g+=`<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${TP_COLORS[a]}" stroke="#fcfcfb" stroke-width="2"/>`;
+    ends.push({y:p[1],x:p[0],name,v:d.ms[a][d.ms[a].length-1]});
+  });
+  ends.sort((a,b)=>a.y-b.y);for(let i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<30)ends[i].y=ends[i-1].y+30; // ラベルの重なり回避
+  ends.forEach(e=>{g+=`<text x="${e.x+10}" y="${e.y+4}" fill="#0b0b0b">${e.name}</text><text x="${e.x+10}" y="${e.y+18}" fill="#52514e" font-size="11">${tf(e.v)} ms</text>`;});
+  // legend
+  let lx=m.l;ALGOS.forEach(([a,name])=>{g+=`<line x1="${lx}" x2="${lx+18}" y1="${m.t-6}" y2="${m.t-6}" stroke="${TP_COLORS[a]}" stroke-width="2"/><text x="${lx+24}" y="${m.t-2}" fill="#52514e">${name}</text>`;lx+=name.length*12+44});
+  g+=`<line id="tpHair" x1="0" x2="0" y1="${m.t}" y2="${m.t+ih}" stroke="#a9a8a2" visibility="hidden"/>`;
+  g+=`<rect id="tpHit" x="${m.l}" y="${m.t}" width="${iw}" height="${ih}" fill="transparent"/></svg>`;
+  $('tpChart').innerHTML=g;
+  // 縦軸の目盛を凡例と重ならないよう上に余白
+  const svg=$('tpSvg'),hair=$('tpHair'),tip=$('tpTip');
+  $('tpHit').onpointermove=e=>{
+    const b=svg.getBoundingClientRect(),px=e.clientX-b.left;
+    let i=0,bd=1e9;d.ns.forEach((n,k)=>{const dd=Math.abs(X(n)-px);if(dd<bd){bd=dd;i=k}});
+    hair.setAttribute('x1',X(d.ns[i]));hair.setAttribute('x2',X(d.ns[i]));hair.setAttribute('visibility','visible');
+    tip.replaceChildren();
+    const hd=document.createElement('div');hd.textContent=`n = ${d.ns[i]}`;hd.style.color='#52514e';tip.appendChild(hd);
+    ALGOS.map(([a,name])=>[a,name,d.ms[a][i]]).sort((p,q)=>q[2]-p[2]).forEach(([a,name,v])=>{
+      const row=document.createElement('div'),sw=document.createElement('span'),b2=document.createElement('b');
+      sw.className='sw';sw.style.background=TP_COLORS[a];b2.textContent=tf(v)+' ms';
+      row.append(sw,b2,document.createTextNode('　'+name));tip.appendChild(row)});
+    tip.hidden=false;const cb=$('tpChart').getBoundingClientRect();
+    let tx=e.clientX-cb.left+14;if(tx+200>cb.width)tx-=228;tip.style.left=tx+'px';tip.style.top=(e.clientY-cb.top-10)+'px';
+  };
+  $('tpHit').onpointerleave=()=>{hair.setAttribute('visibility','hidden');tip.hidden=true};
+}
+$('tpCsv').onclick=()=>{
+  if(!tpData)return;
+  const rows=[['n',...ALGOS.map(([a,n])=>n+'(ms)')]].concat(tpData.ns.map((n,i)=>[n,...ALGOS.map(([a])=>tpData.ms[a][i].toFixed(4))]));
+  const csv='\ufeff# '+tpData.cond+'\n'+rows.map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='計算時間.csv';a.click();
+};
+$('tpPng').onclick=()=>{
+  const svg=$('tpSvg');if(!svg)return;
+  const img=new Image(),src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(svg));
+  img.onload=()=>{const c=document.createElement('canvas'),k=2;c.width=svg.width.baseVal.value*k;c.height=svg.height.baseVal.value*k;const x=c.getContext('2d');x.scale(k,k);x.drawImage(img,0,0);
+    const a=document.createElement('a');a.href=c.toDataURL('image/png');a.download='計算時間グラフ.png';a.click()};
+  img.src=src;
+};
+regen();
+</script>
+</body>
+</html>
